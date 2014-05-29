@@ -10,7 +10,7 @@ public class Main {
 	private static boolean playerFirst;
 
 	public static void main(String[] args) {
-		moves = new ArrayList<>(64);
+		moves = new ArrayList<>(16);
 
 		final Scanner SCAN = new Scanner(System.in);
 
@@ -25,40 +25,56 @@ public class Main {
 		Move last = null;
 		State current = new State();
 		while (moves.size() < 64) {
-			System.out.format("Turn %d:%n", moves.size() + 1);
+			System.out.format("%nTurn %d:%n", moves.size() + 1);
 			System.out.format("%s%n", current);
 
 			if (last != null && State.isWinningMove(current, last.i, last.j)) {
 				System.out.format("%c's have won!%n", resolvePlayer(moves.size()-1));
-				break;
+				SCAN.close();
+				System.exit(0);
 			} else {
 				displayMoves();
 			}
 
-			do {
-				while (!SCAN.hasNext("[a-hA-H][1-8]")) {
-					SCAN.next();
-				}
+			if (resolvePlayer(moves.size()) == 'O') {
+				i = 0;
+				j = 0;
+				current = current.set(i, j, State.O);
+			} else {
+				do {
+					while (!SCAN.hasNext("[a-hA-H][1-8]")) {
+						SCAN.next();
+					}
 
-				String next = SCAN.next();
-				i = Character.toUpperCase(next.charAt(0)) - 'A';
-				j = next.charAt(1) - '0' - 1;
-			} while (current.get(i, j) != 0);
+					String next = SCAN.next();
+					i = Character.toUpperCase(next.charAt(0)) - 'A';
+					j = next.charAt(1) - '0' - 1;
+				} while (current.get(i, j) != 0);
 
-			current = current.set(i, j, resolvePlayer(moves.size()) == 'O' ? State.O : State.X);
+				current = current.set(i, j, State.X);
+			}
 
 			last = new Move(i, j);
 			moves.add(last);
 		}
 
 		System.out.format("No more moves can be made, the game is a tie%n");
+		SCAN.close();
 	}
 
 	private static char resolvePlayer(int i) {
-		if ((i & 1) == 0) {
-			return 'O';
+		if (playerFirst) {
+			if ((i & 1) != 0) {
+				return 'O';
+			} else {
+				return 'X';
+			}
 		} else {
-			return 'X';
+			if ((i & 1) == 0) {
+				return 'O';
+			} else {
+				return 'X';
+			}
 		}
 	}
 
@@ -68,7 +84,11 @@ public class Main {
 		}
 
 		System.out.format("Move List:%n");
-		System.out.format("    O  X%n");
+		if (playerFirst) {
+			System.out.format("    X  0%n");
+		} else {
+			System.out.format("    O  X%n");
+		}
 
 		Iterator<Move> it = moves.iterator();
 		for (int i = 0; true; i++) {
