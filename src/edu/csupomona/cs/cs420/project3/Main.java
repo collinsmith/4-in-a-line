@@ -6,8 +6,16 @@ import java.util.List;
 import java.util.Scanner;
 
 public class Main {
+	private static final Heuristic adjacentOnly = new Heuristic() {
+		@Override
+		public int evaluate(long oLocs, long xLocs, int i, int j) {
+			return 1;
+		}
+	};
+
 	private static List<Move> moves;
 	private static boolean playerFirst;
+	private static int AI_TIME;
 
 	public static void main(String[] args) {
 		moves = new ArrayList<>(16);
@@ -20,6 +28,13 @@ public class Main {
 		}
 
 		playerFirst = Character.toUpperCase(SCAN.next().charAt(0)) != 'O';
+
+		System.out.format("How long does the AI player have to choose a move (seconds)? ");
+		while (!SCAN.hasNextInt()) {
+			SCAN.next();
+		}
+
+		AI_TIME = SCAN.nextInt();
 
 		int i, j;
 		Move last = null;
@@ -124,7 +139,12 @@ public class Main {
 		}
 	}
 
+	private interface Heuristic {
+		int evaluate(long oLocs, long xLocs, int i, int j);
+	}
+
 	private static class State {
+		static final int BLANK = 0;
 		static final int O = 1 << 0;
 		static final int X = 1 << 1;
 
@@ -146,30 +166,29 @@ public class Main {
 
 		int get(int i, int j) {
 			long mod = 1L << getShift(i, j);
-			long o = O_LOCS & mod;
-			long x = X_LOCS & mod;
-			if (o != 0) {
+			long val = O_LOCS & mod;
+			if (val != 0) {
 				return O;
-			} else if (x != 0) {
-				return X;
-			} else {
-				return 0;
 			}
+
+			val = X_LOCS & mod;
+			if (val != 0) {
+				return X;
+			}
+
+			return BLANK;
 		}
 
 		State set(int i, int j, int val) {
-			int shift = getShift(i, j);
-			long o = O_LOCS;
-			long x = X_LOCS;
 			if (val == O) {
-				o |= 1L << shift;
+				int shift = getShift(i, j);
+				return new State(O_LOCS|(1L << shift), X_LOCS);
 			} else if (val == X) {
-				x |= 1L << shift;
+				int shift = getShift(i, j);
+				return new State(O_LOCS, X_LOCS|(1L << shift));
 			} else {
 				throw new IllegalArgumentException();
 			}
-
-			return new State(o, x);
 		}
 
 		static boolean isWinningMove(State s, int i, int j) {
@@ -232,18 +251,18 @@ public class Main {
 			StringBuilder sb = new StringBuilder(172);
 			sb.append("  1 2 3 4 5 6 7 8 \n");
 
-			long loc;
+			long val;
 			for (int i = 0; i < 8; i++) {
 				sb.append(((char)('A' + i)));
 				sb.append(' ');
 
 				for (int j = 0; j < 8; j++) {
-					loc = get(i, j);
-					if (loc == 0) {
+					val = get(i, j);
+					if (val == 0) {
 						sb.append("- ");
-					} else if (loc == O) {
+					} else if (val == O) {
 						sb.append("O ");
-					} else if (loc == X) {
+					} else if (val == X) {
 						sb.append("X ");
 					} else {
 						throw new IllegalStateException();
