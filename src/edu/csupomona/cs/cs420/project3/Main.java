@@ -1,8 +1,10 @@
 package edu.csupomona.cs.cs420.project3;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Random;
 import java.util.Scanner;
 
 public class Main {
@@ -18,8 +20,14 @@ public class Main {
 	private static int AI_TIME;
 
 	public static void main(String[] args) {
+		for (int i = 0; i < 64; i++) {
+			//System.out.println(Arrays.toString(State.unShift(Long.numberOfTrailingZeros(1L<<i))));
+		}
+		
 		moves = new ArrayList<>(16);
 
+		final Random RAND = new Random();
+		
 		final Scanner SCAN = new Scanner(System.in);
 
 		System.out.format("Who is going first (O or X)? ");
@@ -43,19 +51,21 @@ public class Main {
 			System.out.format("%nTurn %d:%n", moves.size() + 1);
 			System.out.format("%s%n", current);
 
-			if (last != null && State.isWinningMove(current, last.i, last.j)) {
+			if (last != null && State.isWin(current, last.i, last.j)) {
 				System.out.format("%c's have won!%n", resolvePlayer(moves.size()-1));
 				SCAN.close();
 				System.exit(0);
-			} else {
-				displayMoves();
 			}
 
 			if (resolvePlayer(moves.size()) == 'O') {
-				i = 0;
-				j = 0;
-				current = current.set(i, j, State.O);
+				System.out.format("Hmm...%n");
+				State successor = current.getSuccessors(moves.size(), State.O)[RAND.nextInt(64-moves.size())];
+				long newBit = successor.O_LOCS^current.O_LOCS;
+				int shift = Long.numberOfTrailingZeros(newBit);
+				last = Move.decode(shift);
+				current = current.set(last.i, last.j, State.O); //todo optimize
 			} else {
+				displayMoves();
 				do {
 					while (!SCAN.hasNext("[a-hA-H][1-8]")) {
 						SCAN.next();
@@ -67,9 +77,9 @@ public class Main {
 				} while (current.get(i, j) != 0);
 
 				current = current.set(i, j, State.X);
+				last = new Move(i, j);
 			}
-
-			last = new Move(i, j);
+			
 			moves.add(last);
 		}
 
@@ -124,18 +134,37 @@ public class Main {
 		}
 	}
 
+	private static Move search(State current) {
+		return null;
+	}
+	
+	private static int max(int alpha, int beta) {
+		return 0;
+	}
+	
+	private static int min(int alpha, int beta) {
+		return 0;
+	}
+	
 	private static class Move {
 		final int i;
 		final int j;
 
 		Move(int i, int j) {
+			assert 0 <= i && i < 8 : String.format("i=%d;j=%d", i, j);
+			assert 0 <= j && j < 8 : String.format("i=%d;j=%d", i, j);
 			this.i = i;
 			this.j = j;
 		}
-
+		
 		@Override
 		public String toString() {
 			return String.format("%c%d", 'A' + i, j + 1);
+		}
+		
+		static Move decode(int flags) {
+			int[] move = State.unShift(flags);
+			return new Move(move[0], move[1]);
 		}
 	}
 
@@ -147,6 +176,8 @@ public class Main {
 		static final int BLANK = 0;
 		static final int O = 1 << 0;
 		static final int X = 1 << 1;
+		
+		static long blanks = 0xFFFFFFFFFFFFFFFFL;
 
 		final long O_LOCS;
 		final long X_LOCS;
@@ -163,35 +194,64 @@ public class Main {
 		static int getShift(int i, int j) {
 			return ((i << 3) + j);
 		}
+		
+		static int[] unShift(int loc) {
+			int i = loc / 8;
+			int j = loc % 8;
+			return new int[] {i, j};
+		}
 
 		int get(int i, int j) {
 			long mod = 1L << getShift(i, j);
-			long val = O_LOCS & mod;
-			if (val != 0) {
+			if ((O_LOCS&mod) != 0) {
 				return O;
-			}
-
-			val = X_LOCS & mod;
-			if (val != 0) {
+			} else if ((X_LOCS&mod) != 0) {
 				return X;
+			} else {
+				return BLANK;
 			}
-
-			return BLANK;
 		}
 
 		State set(int i, int j, int val) {
-			if (val == O) {
-				int shift = getShift(i, j);
-				return new State(O_LOCS|(1L << shift), X_LOCS);
-			} else if (val == X) {
-				int shift = getShift(i, j);
-				return new State(O_LOCS, X_LOCS|(1L << shift));
-			} else {
-				throw new IllegalArgumentException();
+			assert get(i, j) == BLANK : String.format("i=%d;j=%d", i, j);
+			long flag = (1L << getShift(i, j));
+			blanks &= ~flag; //todo optimize
+			//System.out.println(Long.toBinaryString(blanks));
+			switch (val) {
+				case O: return new State(O_LOCS|flag, X_LOCS);
+				case X: return new State(O_LOCS, X_LOCS|flag);
+				default: throw new IllegalArgumentException();
 			}
 		}
+		
+		State[] getSuccessors(int moves, int val) {
+			int id = 0;
+			State[] successors = new State[64-moves];
+			
+			switch (val) {
+				case O:
+					long i;
+					for (int j = 0; j < 64; j++) {
+						i = 1L<<j;
+						if ((i&blanks) != 0) {
+							successors[id] = new State(O_LOCS|i, X_LOCS);
+							id++;
+						}
+					}
+					
+					break;
+				case X:
+					throw new IllegalArgumentException();
+			}
+			
+			if (id != successors.length) {
+				throw new IllegalStateException(String.format("id=%d;len=%d", id, successors.length));
+			}
+			
+			return successors;
+		}
 
-		static boolean isWinningMove(State s, int i, int j) {
+		static boolean isWin(State s, int i, int j) {
 			int val = s.get(i, j);
 			if (val == O) {
 				int countRow = 0;
