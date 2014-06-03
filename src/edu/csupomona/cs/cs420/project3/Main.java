@@ -10,49 +10,86 @@ public class Main {
 	private static enum Heuristics implements Heuristic {
 		DEFAULT() {
 			@Override
-			public int evaluate(State state, Move move) {
+			public int evaluate(final State state, final int i, final int j) {
 				int count = 0;
-				for (int i = Math.max(0, move.i-3); i < move.i; i++) {
-					if (state.get(i, move.j) == State.X) {
+				for (int x = Math.max(0, i-3); x < i; x++) {
+					if (state.get(x, j) == State.X) {
 						count++;
 					}
 				}
 
-				for (int i = Math.min(move.i+3, 7); move.i < i; i--) {
-					if (state.get(i, move.j) == State.X) {
+				for (int x = Math.min(i+3, 7); i < x; x--) {
+					if (state.get(x, j) == State.X) {
 						count++;
 					}
 				}
 
-				for (int j = Math.max(0, move.j-3); j < move.j; j++) {
-					if (state.get(move.i, j) == State.X) {
+				for (int y = Math.max(0, j-3); y < j; y++) {
+					if (state.get(i, y) == State.X) {
 						count++;
 					}
 				}
 
-				for (int j = Math.min(move.j+3, 7); move.j < j; j--) {
-					if (state.get(move.i, j) == State.X) {
+				for (int y = Math.min(j+3, 7); j < y; y--) {
+					if (state.get(i, y) == State.X) {
 						count++;
 					}
 				}
 
-				//return state.get(move.i, move.j) == State.O ? count : -count;
-				return count;
+				return state.get(i, j) == State.O ? count : -count;
 			}
-		};
+		},
+		TAKE_TWO() {
+			@Override
+			public int evaluate(final State state, final int i, final int j) {
+				int player = state.get(i, j);
+				int enemy = player == State.O ? State.X : State.O;
+
+				// "the three"
+				int threes = 0;
+				int count;
+				for (int x = 0; x < 8; x++) {
+					for (int y = 0; y < 4; y++) {
+						count = 0;
+						for (int z = y; z < y+4; z++) {
+							if (state.get(x, z) == enemy) {
+								count++;
+							}
+						}
+
+						if (count == 3) {
+							threes++;
+						}
+					}
+				}
+
+				for (int y = 0; y < 8; y++) {
+					for (int x = 0; x < 4; x++) {
+						count = 0;
+						for (int z = x; z < x+4; z++) {
+							if (state.get(z, y) == enemy) {
+								count++;
+							}
+						}
+
+						if (count == 3) {
+							threes++;
+						}
+					}
+				}
+
+				return player == State.O ? threes : -threes;
+			}
+		},
 	};
 
-	private static final Heuristic HEURISTIC = Heuristics.DEFAULT;
+	private static final Heuristic HEURISTIC = Heuristics.TAKE_TWO;
 
 	private static List<Move> moves;
 	private static boolean playerFirst;
 	private static int ai_time;
 
 	public static void main(String[] args) {
-		for (int i = 0; i < 64; i++) {
-			//System.out.println(Arrays.toString(State.unShift(Long.numberOfTrailingZeros(1L<<i))));
-		}
-
 		moves = new ArrayList<>(16);
 
 		final Random RAND = new Random();
@@ -113,11 +150,52 @@ public class Main {
 				last = new Move(i, j);
 			}
 
+			check(current, last.i, last.j);
+
 			moves.add(last);
 		}
 
 		System.out.format("No more moves can be made, the game is a tie%n");
 		SCAN.close();
+	}
+
+	private static void check(State state, final int i, final int j) {
+		int player = state.get(i, j);
+		int enemy = player == State.O ? State.X : State.O;
+
+		int threes = 0;
+		int count;
+		for (int x = 0; x < 8; x++) {
+			for (int y = 0; y < 4; y++) {
+				count = 0;
+				for (int z = y; z < y+4; z++) {
+					if (state.get(x, z) == enemy) {
+						count++;
+					}
+				}
+
+				if (count == 3) {
+					threes++;
+				}
+			}
+		}
+
+		for (int y = 0; y < 8; y++) {
+			for (int x = 0; x < 4; x++) {
+				count = 0;
+				for (int z = x; z < x+4; z++) {
+					if (state.get(z, y) == enemy) {
+						count++;
+					}
+				}
+
+				if (count == 3) {
+					threes++;
+				}
+			}
+		}
+
+		System.out.format("%d threes in this state!%n", threes);
 	}
 
 	private static char resolvePlayer(int i) {
@@ -248,7 +326,7 @@ public class Main {
 		State best_successor = null;
 		State[] successors = current.getSuccessors(moves.size(), State.O);
 		for (State successor : successors) {
-			score = alphabeta(current, successor, 64-successors.length, 5, Integer.MIN_VALUE, Integer.MAX_VALUE, true);
+			score = alphabeta(current, successor, moves.size()+1, 4, Integer.MIN_VALUE, Integer.MAX_VALUE, true);
 			if (best_score < score) {
 				best_score = score;
 				best_successor = successor;
@@ -265,13 +343,13 @@ public class Main {
 		if (depth == 0 || moves == 64 || current.getWinner() != State.BLANK) {
 			long newBit = predecessor.O_LOCS^current.O_LOCS;
 			int shift = newBit == 0L ? 0 : Long.numberOfTrailingZeros(newBit);
-			return HEURISTIC.evaluate(current, Move.decode(shift));
+			return HEURISTIC.evaluate(current, shift / 8, shift % 8);
 		}
 
-		State[] successors = current.getSuccessors(moves, maximizing ? State.O : State.X);
+		State[] successors = current.getSuccessors(moves, maximizing ? State.X : State.O);
 		if (maximizing) {
 			for (State successor : successors) {
-				alpha = Math.max(alpha, alphabeta(current, successor, 64-successors.length, depth-1, alpha, beta, false));
+				alpha = Math.max(alpha, alphabeta(current, successor, moves+1, depth-1, alpha, beta, false));
 				if (beta <= alpha) {
 					break;
 				}
@@ -280,7 +358,7 @@ public class Main {
 			return alpha;
 		} else {
 			for (State successor : successors) {
-				beta = Math.min(beta, alphabeta(current, successor, 64-successors.length, depth-1, alpha, beta, true));
+				beta = Math.min(beta, alphabeta(current, successor, moves+1, depth-1, alpha, beta, true));
 				if (beta <= alpha) {
 					break;
 				}
@@ -313,7 +391,7 @@ public class Main {
 	}
 
 	private interface Heuristic {
-		int evaluate(State s, Move m);
+		int evaluate(final State s, final int i, final int j);
 	}
 
 	private static class State {
@@ -321,7 +399,7 @@ public class Main {
 		static final int O = 1 << 0;
 		static final int X = 1 << 1;
 
-		static long blanks = 0xFFFF_FFFF_FFFF_FFFFL;
+		final long BLANKS; //0xFFFF_FFFF_FFFF_FFFFL
 
 		final long O_LOCS;
 		final long X_LOCS;
@@ -333,6 +411,7 @@ public class Main {
 		State(long oLocs, long xLocs) {
 			this.O_LOCS = oLocs;
 			this.X_LOCS = xLocs;
+			this.BLANKS = ~(O_LOCS|X_LOCS);
 		}
 
 		static int getShift(int i, int j) {
@@ -359,8 +438,7 @@ public class Main {
 		State set(int i, int j, int val) {
 			assert get(i, j) == BLANK : String.format("i=%d;j=%d", i, j);
 			long flag = (1L << getShift(i, j));
-			blanks &= ~flag; //todo optimize
-			//System.out.println(Long.toBinaryString(blanks));
+			//blanks &= ~flag; //todo optimize
 			switch (val) {
 				case O: return new State(O_LOCS|flag, X_LOCS);
 				case X: return new State(O_LOCS, X_LOCS|flag);
@@ -369,27 +447,23 @@ public class Main {
 		}
 
 		State[] getSuccessors(int moves, int val) {
-			int id = 0;
 			State[] successors = new State[64-moves];
 
-			long i;
+			int id = 0;
 			switch (val) {
 				case O:
-					for (int j = 0; j < 64; j++) {
-						i = 1L<<j;
-						if ((i&blanks) != 0) {
-							successors[id] = new State(O_LOCS|i, X_LOCS);
-							id++;
+					int j = 0;
+					for (long i = (1L << 63); i != 0L; i >>>= 1) {
+						if ((i&BLANKS) != 0) {
+							successors[id++] = new State(O_LOCS|i, X_LOCS);
 						}
 					}
 
 					break;
 				case X:
-					for (int j = 0; j < 64; j++) {
-						i = 1L<<j;
-						if ((i&blanks) != 0) {
-							successors[id] = new State(O_LOCS, X_LOCS|i);
-							id++;
+					for (long i = (1L << 63); i != 0L; i >>>= 1) {
+						if ((i&BLANKS) != 0) {
+							successors[id++] = new State(O_LOCS, X_LOCS|i);
 						}
 					}
 
@@ -397,7 +471,7 @@ public class Main {
 			}
 
 			if (id != successors.length) {
-				throw new IllegalStateException(String.format("id=%d;len=%d", id, successors.length));
+				throw new IllegalStateException(String.format("successors length is not correct. size=%d; should be=%d", id, successors.length));
 			}
 
 			return successors;
@@ -498,8 +572,7 @@ public class Main {
 				sb.append('\n');
 			}
 
-			sb.deleteCharAt(sb.length() - 1);
-			return sb.toString();
+			return sb.substring(0, sb.length() - 1);
 		}
 	}
 }
