@@ -1,8 +1,5 @@
 package edu.csupomona.cs.cs420.project3;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
 import java.util.Random;
 import java.util.Scanner;
 
@@ -85,12 +82,21 @@ public class Main {
 
 	private static final Heuristic HEURISTIC = Heuristics.TAKE_TWO;
 
-	private static List<Move> moves;
+	private static Move[] moves;
+	private static int move;
+
 	private static boolean playerFirst;
 	private static int ai_time;
 
 	public static void main(String[] args) {
-		moves = new ArrayList<>(16);
+		for (int z = 0; z < 64; z++) {
+			int i = (z >> 3);
+			int j = (z & 7);
+			System.out.format("%d, %d%n", i, j);
+		}
+
+		moves = new Move[64];
+		move = 0;
 
 		final Random RAND = new Random();
 
@@ -113,19 +119,19 @@ public class Main {
 		int i, j;
 		Move last = null;
 		State current = new State();
-		while (moves.size() < 64) {
-			System.out.format("%nTurn %d:%n", moves.size() + 1);
+		while (move < moves.length) {
+			System.out.format("%nTurn %d:%n", move + 1);
 			System.out.format("%s%n", current);
 
 			if (last != null && current.getWinner(last.i, last.j) != State.BLANK) {
-				System.out.format("%c's have won!%n", resolvePlayer(moves.size()-1));
+				System.out.format("%c's have won!%n", resolvePlayer(move - 1));
 				SCAN.close();
 				System.exit(0);
 			}
 
-			if (resolvePlayer(moves.size()) == 'O') {
+			if (resolvePlayer(move) == 'O') {
 				System.out.format("Hmm...%n");
-				if (moves.isEmpty()) {
+				if (move == 0) {
 					i = 3 + RAND.nextInt(2);
 					j = 3 + RAND.nextInt(2);
 					last = new Move(i, j);
@@ -152,7 +158,7 @@ public class Main {
 
 			check(current, last.i, last.j);
 
-			moves.add(last);
+			moves[move++] = last;
 		}
 
 		System.out.format("No more moves can be made, the game is a tie%n");
@@ -226,17 +232,16 @@ public class Main {
 			System.out.format("    O  X%n");
 		}
 
-		Iterator<Move> it = moves.iterator();
-		for (int i = 0; true; i++) {
-			System.out.format("%3s ", String.format("%d.", i + 1));
-			if (it.hasNext()) {
-				System.out.format("%s ", it.next());
+		for (int turn = 1, i = 0; true; turn++) {
+			System.out.format("%3s ", String.format("%d.", turn));
+			if (i < move && moves[i] != null) {
+				System.out.format("%s ", moves[i++]);
 			} else {
 				break;
 			}
 
-			if (it.hasNext()) {
-				System.out.format("%s", it.next());
+			if (i < move && moves[i] != null) {
+				System.out.format("%s", moves[i++]);
 			} else {
 				break;
 			}
@@ -255,18 +260,18 @@ public class Main {
 
 		int score = 0;
 		State best_successor = null;
-		State[] successors = current.getSuccessors(moves.size(), val);
-		for (int i = 0; i < successors.length; i++) {
-			score = minimax_ab(current, successors[i], successors.length, val == State.O ? State.X : State.O, Integer.MIN_VALUE, Integer.MAX_VALUE);
+		State[] successors = current.getSuccessors(move, val);
+		for (State successor : successors) {
+			score = minimax_ab(current, successor, successors.length, val == State.O ? State.X : State.O, Integer.MIN_VALUE, Integer.MAX_VALUE);
 			if (val == State.O) {
 				if (best_score < score) {
 					best_score = score;
-					best_successor = successors[i];
+					best_successor = successor;
 				}
 			} else {
 				if (score < best_score) {
 					best_score = score;
-					best_successor = successors[i];
+					best_successor = successor;
 				}
 			}
 		}
@@ -293,8 +298,8 @@ public class Main {
 		int score;
 		State[] successors = successor.getSuccessors(moves+1, val == State.O ? State.X : State.O);
 		if (val == State.O) {
-			for (int i = 0; i < successors.length; i++) {
-				score = minimax_ab(successor, successors[i], successors.length, val == State.O ? State.X : State.O, alpha, beta);
+			for (State successor1 : successors) {
+				score = minimax_ab(successor, successor1, successors.length, val == State.O ? State.X : State.O, alpha, beta);
 				if (alpha < score) {
 					alpha = score;
 					if (beta <= alpha) {
@@ -305,8 +310,8 @@ public class Main {
 
 			return alpha;
 		} else {
-			for (int i = 0; i < successors.length; i++) {
-				score = minimax_ab(successor, successors[i], successors.length, val == State.O ? State.X : State.O, alpha, beta);
+			for (State successor1 : successors) {
+				score = minimax_ab(successor, successor1, successors.length, val == State.O ? State.X : State.O, alpha, beta);
 				if (score < beta) {
 					beta = score;
 					if (beta <= alpha) {
@@ -323,10 +328,18 @@ public class Main {
 		int best_score = Integer.MIN_VALUE;
 
 		int score = 0;
-		State best_successor = null;
-		State[] successors = current.getSuccessors(moves.size(), State.O);
+		State best_successor;
+		State[] successors = current.getSuccessors(move, State.O);
+		if (successors.length == 0) {
+			best_successor = null;
+			long newBit = best_successor.O_LOCS^current.O_LOCS;
+			int shift = newBit == 0L ? 0 : Long.numberOfTrailingZeros(newBit);
+			return Move.decode(shift);
+		}
+
+		best_successor = successors[0];
 		for (State successor : successors) {
-			score = alphabeta(current, successor, moves.size()+1, 4, Integer.MIN_VALUE, Integer.MAX_VALUE, true);
+			score = alphabeta(current, successor, move+1, 4, Integer.MIN_VALUE, Integer.MAX_VALUE, true);
 			if (best_score < score) {
 				best_score = score;
 				best_successor = successor;
