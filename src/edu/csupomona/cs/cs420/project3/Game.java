@@ -12,68 +12,145 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public class Game implements Runnable {
-	private static final Heuristic DEFAULT = new Heuristic() {
-		@Override
-		public int evaluate(State state, byte val) {
-			assert val == O : "val should be O";
+	private static enum Heuristics implements Heuristic {
+		DEFAULT() {
+			@Override
+			public int evaluate(Node state, byte piece, final int i, final int j) {
+				byte val;
+				byte enemy = piece == O ? X : O;
 
-			switch (state.getWinner()) {
-				case O: return Integer.MIN_VALUE;
-				case X: return Integer.MAX_VALUE;
-			}
+				byte winner = state.getLocalWinner(i, j);
+				if (winner == piece) {
+					return Integer.MAX_VALUE;
+				} else if (winner == enemy) {
+					return Integer.MIN_VALUE;
+				} else if (winner == DRAW) {
+					return 0;
+				}
 
-			int count = 0;
-			for (int i = 0; i < 8; i++) {
-				for (int j = 0; j < 8; j++) {
-					for (int x = Math.max(0, i-3); x < i; x++) {
-						if (state.get(x, j) == X) {
-							count++;
+				int count = 0;
+				for (int k = 0; k < 8; k++) {
+					for (int l = 0; l < 8; l++) {
+						for (int x = Math.max(0, k-3); x < k; x++) {
+							if (state.get(x, l) == piece) {
+								count++;
+							}
 						}
-					}
 
-					for (int x = Math.min(i+3, 7); i < x; x--) {
-						if (state.get(x, j) == X) {
-							count++;
+						for (int x = Math.min(k+3, 7); k < x; x--) {
+							if (state.get(x, l) == piece) {
+								count++;
+							}
 						}
-					}
 
-					for (int y = Math.max(0, j-3); y < j; y++) {
-						if (state.get(i, y) == X) {
-							count++;
+						for (int y = Math.max(0, l-3); y < l; y++) {
+							if (state.get(k, y) == piece) {
+								count++;
+							}
 						}
-					}
 
-					for (int y = Math.min(j+3, 7); j < y; y--) {
-						if (state.get(i, y) == X) {
-							count++;
+						for (int y = Math.min(l+3, 7); l < y; y--) {
+							if (state.get(k, y) == piece) {
+								count++;
+							}
 						}
 					}
 				}
+
+				return count;
 			}
+		},
+		MARK2() {
+			@Override
+			public int evaluate(Node state, byte piece, final int i, final int j) {
+				byte val;
+				byte enemy = piece == O ? X : O;
 
-			return count;
-		}
-	};
+				byte winner = state.getLocalWinner(i, j);
+				if (winner == piece) {
+					return Integer.MAX_VALUE;
+				} else if (winner == enemy) {
+					return Integer.MIN_VALUE;
+				} else if (winner == DRAW) {
+					return 0;
+				}
 
-	private static final byte BLANK	= 0;
-	private static final byte O		= 1 << 0;
-	private static final byte X		= 1 << 1;
+				int count;
 
-	private static char toChar(byte val) {
-		switch (val) {
+				int straightThrees = 0;
+				for (int x = 0; x < 8; x++) {
+					for (int y = 0; y < 5; y++) {
+						count = 0;
+						for (int k = y; k < y+4; k++) {
+							val = state.get(x, y);
+							if (val == piece) {
+								count++;
+							} else if (val == enemy) {
+								count = 0;
+							}
+						}
+
+						if (3 <= count) {
+							straightThrees++;
+						}
+					}
+				}
+
+				int straightTwos = 0;
+				for (int x = 0; x < 8; x++) {
+					for (int y = 0; y < 6; y++) {
+						count = 0;
+						for (int k = y; k < y+3; k++) {
+							val = state.get(x, y);
+							if (val == piece) {
+								count++;
+							} else if (val == enemy) {
+								count = 0;
+							}
+						}
+
+						if (2 <= count) {
+							straightThrees++;
+						}
+					}
+				}
+
+				int eval = (straightThrees*100) + (straightTwos*10);
+				return piece == O ? eval : -eval;
+			}
+		},
+	}
+
+	public static void main(String[] args) {
+		//testMove();
+		//testNode();
+		//testActions();
+		//testLocalWinConditions();
+
+		Game g = new Game(Heuristics.DEFAULT);
+		g.run();
+	}
+
+	private static final byte BLANK = 0;
+	private static final byte O = 1 << 0;
+	private static final byte X = 1 << 1;
+
+	private static char toChar(byte piece) {
+		switch (piece) {
 			case BLANK:	return '-';
 			case O:	return 'O';
 			case X:	return 'X';
-			default: throw new IllegalArgumentException("val should be a valid space state");
+			default:	throw new IllegalArgumentException();
 		}
 	}
 
 	private static final byte UNKNOWN	= -1;
-	private static final byte DRAW	= BLANK;
+	private static final byte DRAW	= 0;
 
-	private final Scanner SCAN;
+	private static final byte NULL_ACTION = -1;
 
 	private final Heuristic HEURISTIC;
+	private final Scanner SCAN;
 
 	private final boolean PLAYER_FIRST;
 	private final long AI_TIME;
@@ -81,15 +158,15 @@ public class Game implements Runnable {
 	private final int[] MOVES;
 	private int move;
 
-	private State board;
+	//private final long[][] TRANSPOSITION;
 
-	public static void main(String[] args) {
-		Game g = new Game(DEFAULT);
-		g.run();
-	}
+	private Node currentState;
 
-	Game(Heuristic heuristic) {
+	private Game(Heuristic heuristic) {
 		this.HEURISTIC = heuristic;
+
+		//this.TRANSPOSITION = new long[Long.SIZE][3];
+		//initZobrist();
 
 		this.SCAN = new Scanner(System.in);
 
@@ -100,19 +177,37 @@ public class Game implements Runnable {
 
 		this.PLAYER_FIRST = Character.toUpperCase(SCAN.next().charAt(0)) != toChar(O);
 
-		System.out.format("How long does the AI player have to choose a move (seconds)? ");
-		while (!SCAN.hasNextInt()) {
+		System.out.format("How long does the AI player have to choose a move (ms)? ");
+		while (!SCAN.hasNextLong()) {
 			SCAN.next();
 		}
 
 		this.AI_TIME = SCAN.nextLong();
 
-		this.board = new State();
+		currentState = new Node(0L, 0L);
 
-		this.MOVES = new int[64];
-		Arrays.fill(MOVES, -1);
+		this.MOVES = new int[Long.SIZE];
+		Arrays.fill(MOVES, NULL_ACTION);
 		this.move = 0;
 	}
+
+	/*private void initZobrist() {
+		final Random RAND = new Random();
+		for (int i = 0; i < TRANSPOSITION.length; i++) {
+			for (int j = 0; j < TRANSPOSITION[i].length; j++) {
+				TRANSPOSITION[i][j] = RAND.nextLong();
+			}
+		}
+	}
+
+	private int createKey(Node n) {
+		int key = 0;
+		for (int indexed = 0; indexed < Long.SIZE; indexed++) {
+			key ^= TRANSPOSITION[indexed][n.get(Move.unindexi(indexed), Move.unindexj(indexed))];
+		}
+
+		return key;
+	}*/
 
 	@Override
 	public void run() {
@@ -120,18 +215,18 @@ public class Game implements Runnable {
 
 		int i, j;
 		byte winner;
-		int lastMove = -1;
 		String playerMove;
+		int lastMove = NULL_ACTION;
 		byte currentPlayer = BLANK;
-		while (move < MOVES.length) {
+		while (true) {
 			System.out.format("%nTurn %d:%n", move+1);
-			System.out.format("%s%n", board);
+			System.out.format("%s%n", currentState);
 
-			if (currentPlayer != 0 && lastMove != -1 && (winner = board.getWinner()) != UNKNOWN) {
-				int unshift = Move.unShift(lastMove);
-				i = Move.unmaski(unshift);
-				j = Move.unmaskj(unshift);
-				assert winner == board.getLocalWinner(i, j) : String.format("local winner (%d) should match global winner (%d)", board.getLocalWinner(i, j), winner);
+			if ((currentPlayer&(O|X)) != 0 && lastMove != NULL_ACTION && (winner = currentState.getWinner()) != UNKNOWN) {
+				i = Move.unmaski(lastMove);
+				j = Move.unmaskj(lastMove);
+				byte check;
+				assert winner == (check = currentState.getLocalWinner(i, j)) : String.format("local winner (%d) should match global winner (%d)", check, winner);
 
 				SCAN.close();
 				if (winner == DRAW) {
@@ -143,51 +238,47 @@ public class Game implements Runnable {
 				return;
 			}
 
-			if ((currentPlayer = resolvePlayer()) == O) {
+			currentPlayer = resolvePlayer();
+			if (currentPlayer == O) {
 				System.out.format("Hmm...%n");
 				if (move == 0) {
 					i = 3 + RAND.nextInt(2);
 					j = 3 + RAND.nextInt(2);
 				} else {
-					IDSABSearch searcher = new IDSABSearch(this, board, move, HEURISTIC);
+					IDSABSearch searcher = new IDSABSearch(this, currentState, HEURISTIC);
 					FutureTask<Integer> searcherTask = new FutureTask<>(searcher);
 
 					ExecutorService pool = Executors.newSingleThreadExecutor();
 					pool.execute(searcherTask);
 
-					int bestMove;
+					int bestAction;
 					try {
-						/*long currentTime = System.currentTimeMillis();
-						long quitTime = currentTime + TimeUnit.SECONDS.toMillis(AI_TIME);
-						do {
-							if (searcher.searched) {
-								bestMove = searcher.bestAction;
-								break;
-							}
-
-							currentTime = System.currentTimeMillis();
-						} while (quitTime < currentTime);
-						bestMove = searcher.bestAction;*/
-
-						bestMove = searcherTask.get(AI_TIME, TimeUnit.SECONDS);
-					} catch (InterruptedException|ExecutionException|TimeoutException e) {
-						bestMove = -1;
+						bestAction = searcherTask.get(AI_TIME, TimeUnit.MILLISECONDS);
+					} catch (TimeoutException e) {
+						searcher.searching = false;
+						try {
+							bestAction = searcherTask.get();
+						} catch (ExecutionException|InterruptedException e2) {
+							e.printStackTrace();
+							bestAction = NULL_ACTION;
+						}
+					} catch (InterruptedException|ExecutionException e) {
 						e.printStackTrace();
+						bestAction = NULL_ACTION;
 					} finally {
 						pool.shutdownNow();
 					}
 
-					if (bestMove == -1) {
-						System.out.println("There was a problem choosing the successors");
+					if (bestAction == NULL_ACTION) {
+						System.out.format("There was a problem choosing the successors%n");
 						System.exit(0);
 					}
 
-					System.out.format("%s%n", searcher);
+					i = Move.unmaski(bestAction);
+					j = Move.unmaskj(bestAction);
+					System.out.format("I think I'll go with %c%d%n", Move.toLetter(i), Move.toNumber(j));
 
-					int unshift = Move.unShift(bestMove);
-					i = Move.unmaski(unshift);
-					j = Move.unmaskj(unshift);
-					System.out.format("AI chose %d, %d%n", i, j);
+					System.out.format("%s%n", searcher);
 				}
 			} else {
 				displayMoves();
@@ -199,11 +290,11 @@ public class Game implements Runnable {
 					playerMove = SCAN.next();
 					i = Character.toUpperCase(playerMove.charAt(0)) - 'A';
 					j = playerMove.charAt(1) - '0' - 1;
-				} while (board.get(i, j) != BLANK);
+				} while (currentState.get(i, j) != BLANK);
 			}
 
-			board = board.set(i, j, currentPlayer);
-			lastMove = Move.shift(i, j);
+			currentState = currentState.set(i, j, currentPlayer);
+			lastMove = Move.compact(Move.index(i, j));
 			MOVES[move++] = lastMove;
 		}
 	}
@@ -233,25 +324,25 @@ public class Game implements Runnable {
 		if (PLAYER_FIRST) {
 			System.out.format("    %c  %c%n", toChar(X), toChar(O));
 		} else {
-			System.out.format("    %c  %c%n", toChar(X), toChar(O));
+			System.out.format("    %c  %c%n", toChar(O), toChar(X));
 		}
 
 		for (int turn = 1, pos = 0; true; turn++) {
 			System.out.format("%3s ", String.format("%d.", turn));
-			if (pos < move && MOVES[pos] != -1) {
-				int unshift = Move.unShift(MOVES[pos++]);
-				int i = Move.unmaski(unshift);
-				int j = Move.unmaskj(unshift);
-				System.out.format("%c%d ", Move.getRow(i), Move.getColumn(j));
+			if (pos < move && MOVES[pos] != NULL_ACTION) {
+				int compacted = MOVES[pos++];
+				int i = Move.unmaski(compacted);
+				int j = Move.unmaskj(compacted);
+				System.out.format("%c%d ", Move.toLetter(i), Move.toNumber(j));
 			} else {
 				break;
 			}
 
-			if (pos < move && MOVES[pos] != -1) {
-				int unshift = Move.unShift(MOVES[pos++]);
-				int i = Move.unmaski(unshift);
-				int j = Move.unmaskj(unshift);
-				System.out.format("%c%d", Move.getRow(i), Move.getColumn(j));
+			if (pos < move && MOVES[pos] != NULL_ACTION) {
+				int compacted = MOVES[pos++];
+				int i = Move.unmaski(compacted);
+				int j = Move.unmaskj(compacted);
+				System.out.format("%c%d", Move.toLetter(i), Move.toNumber(j));
 			} else {
 				break;
 			}
@@ -261,132 +352,134 @@ public class Game implements Runnable {
 	}
 
 	private static interface Heuristic {
-		int evaluate(State state, byte val);
+		int evaluate(Node state, byte piece, int x, int y);
 	}
 
 	private static class IDSABSearch implements Callable<Integer> {
-		private final Game GAME;
-		private final State INITIAL_STATE;
-		private final int MOVES;
-		private final Heuristic HEURISTIC;
+		final Game GAME;
+		final Node INITIAL_STATE;
+		final Heuristic HEURISTIC;
 
-		private volatile boolean searched;
-		private volatile boolean searching;
-		private volatile boolean cancelled;
+		volatile int depthLimit;
+		volatile int bestAction;
+		volatile boolean searched;
+		volatile boolean searching;
 
-		private volatile int bestAction;
+		int maxDepthSearched;
+		int nodesExpanded;
+		long timeElapsed;
 
-		private int depthLimit;
-
-		private int maxDepth;
-		private int expandedNodes;
-		private long elapsedTime;
-
-		IDSABSearch(Game game, State initialState, int moves, Heuristic heuristic) {
+		public IDSABSearch(Game game, Node initialState, Heuristic heuristic) {
 			this.GAME = game;
 			this.INITIAL_STATE = initialState;
-			this.MOVES = moves;
 			this.HEURISTIC = heuristic;
 
+			this.depthLimit = 0;
+			this.bestAction = NULL_ACTION;
 			this.searched = false;
 			this.searching = false;
+
+			this.timeElapsed = 0;
+			this.nodesExpanded = 0;
+			this.maxDepthSearched = 0;
 		}
 
 		@Override
 		public Integer call() throws Exception {
-			if (searched || cancelled) {
-				return -1;
+			if (searched) {
+				return bestAction;
 			}
 
-			depthLimit = 0;
-			bestAction = -1;
-			searching = true;
-
-			int moves = MOVES;
-			//int previousBestAction = -1;
-			State currentState = INITIAL_STATE;
+			final Random RAND = new Random();
 
 			int score;
 			int bestScore = Integer.MIN_VALUE;
-
-			maxDepth = 0;
-			expandedNodes = 0;
+			Node bestState = INITIAL_STATE;
 
 			int i, j;
-			byte val = GAME.resolvePlayer(moves);
 			int[] actions;
-			final long startTime = System.currentTimeMillis();
-			IDS: do {
-				depthLimit++;
-				actions = currentState.getSuccessorMoves(moves);
-				for (int action : actions) {
-					i = Move.unmaski(action);
-					j = Move.unmaskj(action);
-				}
+			byte piece = GAME.resolvePlayer();
+			long startTime = System.currentTimeMillis();
 
+			searching = true;
+			IDS: while (searching) {
+				depthLimit++;
+				actions = bestState.getActions();
 				for (int action : actions) {
-					if (!searching || cancelled) {
+					if (!searching) {
 						break IDS;
 					}
 
-					score = abMin(
-						currentState,
-						moves,
-						Move.unmaski(action),
-						Move.unmaskj(action),
-						GAME.resolvePlayer(moves),
-						Integer.MIN_VALUE,
-						Integer.MAX_VALUE,
-						1
+					if (action == NULL_ACTION) {
+						break;
+					}
+
+					score = min(
+						  bestState,
+						  Move.unmaski(action),
+						  Move.unmaskj(action),
+						  piece == O ? X : O,
+						  Integer.MIN_VALUE,
+						  Integer.MAX_VALUE,
+						  1
 					);
 
-					if (bestScore < score) {
+					if (bestScore == score && RAND.nextBoolean()) {
+						//bestAction = action;
+					} else if (bestScore < score) {
 						bestScore = score;
 						bestAction = action;
 					}
 				}
 
-				// TODO remove
-				if (bestAction == -1) {
-					throw new IllegalStateException("bestAction == -1");
-				}
-
-				//if (previousBestAction == bestAction) {
-				//	break;
-				//}
-
 				i = Move.unmaski(bestAction);
 				j = Move.unmaskj(bestAction);
-				System.out.format("AI choosing %d, %d%n", i, j);
-				currentState = currentState.set(i, j, val);
-				moves++;
+				//System.out.format("Choosing %c%d%n", Move.toLetter(i), Move.toNumber(j));
 
-				//previousBestAction = bestAction;
-			} while (searching);
+				if (bestState.get(i, j) == piece) {
+					//System.out.format("Skipping %c%d, already picked this one%n", Move.toLetter(i), Move.toNumber(j));
+					continue IDS;
+				}
+
+				bestState = bestState.set(i, j, piece);
+			}
+
 			searched = true;
-			elapsedTime = System.currentTimeMillis()-startTime;
+			timeElapsed = System.currentTimeMillis() - startTime;
 			return bestAction;
 		}
 
-		private int abMin(State currentState, int moves, int i, int j, byte val, int alpha, int beta, int depth) {
-			expandedNodes++;
-			maxDepth = Math.max(maxDepth, depth);
-			State node = currentState.set(i, j, val);
-			if (node.getLocalWinner(i, j) != UNKNOWN || depthLimit <= depth) {
-				return HEURISTIC.evaluate(node, val);
+		private int min(Node currentState, int i, int j, byte piece, int alpha, int beta, int depth) {
+			nodesExpanded++;
+			maxDepthSearched = Math.max(maxDepthSearched, depth);
+
+			Node successor = currentState.set(i, j, piece);
+			byte winner = successor.getLocalWinner(i, j);
+			if (winner != UNKNOWN || depthLimit <= depth) {
+				return HEURISTIC.evaluate(successor, piece, i, j);
+				/*if (winner == piece) {
+					return 10000;
+				} else if (winner == DRAW) {
+					return 0;
+				}
+
+				return -10000;*/
 			}
 
-			int[] actions = node.getSuccessorMoves(moves+1);
+			int[] actions = successor.getActions();
 			for (int action : actions) {
-				beta = Math.min(beta, abMax(
-					node,
-					moves+1,
-					Move.unmaski(action),
-					Move.unmaskj(action),
-					val == O ? X : O,
-					alpha,
-					beta,
-					depth+1
+				if (action == NULL_ACTION || !searching) {
+					break;
+				}
+
+				beta = Math.min(beta, max(
+					  successor,
+					  Move.unmaski(action),
+					  Move.unmaskj(action),
+					  piece == O ? X : O,
+					  alpha,
+					  beta,
+					  depth+1
 				));
 
 				if (beta <= alpha) {
@@ -397,25 +490,37 @@ public class Game implements Runnable {
 			return beta;
 		}
 
-		private int abMax(State currentState, int moves, int i, int j, byte val, int alpha, int beta, int depth) {
-			expandedNodes++;
-			maxDepth = Math.max(maxDepth, depth);
-			State node = currentState.set(i, j, val);
-			if (node.getLocalWinner(i, j) != UNKNOWN || depthLimit <= depth) {
-				return HEURISTIC.evaluate(node, val);
+		int max(Node currentState, int i, int j, byte piece, int alpha, int beta, int depth) {
+			nodesExpanded++;
+			maxDepthSearched = Math.max(maxDepthSearched, depth);
+
+			Node successor = currentState.set(i, j, piece);
+			byte winner = successor.getLocalWinner(i, j);
+			if (winner != UNKNOWN || depthLimit <= depth) {
+				return HEURISTIC.evaluate(successor, piece, i, j);
+				/*if (winner == piece) {
+					return 10000;
+				} else if (winner == DRAW) {
+					return 0;
+				}
+
+				return -10000;*/
 			}
 
-			int[] actions = node.getSuccessorMoves(moves+1);
+			int[] actions = successor.getActions();
 			for (int action : actions) {
-				alpha = Math.max(alpha, abMin(
-					node,
-					moves+1,
-					Move.unmaski(action),
-					Move.unmaskj(action),
-					val == O ? X : O,
-					alpha,
-					beta,
-					depth+1
+				if (action == NULL_ACTION || !searching) {
+					break;
+				}
+
+				alpha = Math.max(alpha, min(
+					  successor,
+					  Move.unmaski(action),
+					  Move.unmaskj(action),
+					  piece == O ? X : O,
+					  alpha,
+					  beta,
+					  depth+1
 				));
 
 				if (beta <= alpha) {
@@ -426,65 +531,17 @@ public class Game implements Runnable {
 			return alpha;
 		}
 
-		/*@Override
-		public boolean cancel(boolean mayInterruptIfRunning) {
-			if (isDone() || isCancelled()) {
-				return false;
-			}
-
-			if (mayInterruptIfRunning && searching) {
-				searching = false;
-				cancelled = true;
-				return true;
-			}
-
-			return false;
-		}
-
-		@Override
-		public boolean isCancelled() {
-			return cancelled;
-		}
-
-		@Override
-		public boolean isDone() {
-			return searched;
-		}
-
-		@Override
-		public Integer get() throws InterruptedException, ExecutionException {
-			while (!searched) {
-				//...
-			}
-
-			return bestAction;
-		}
-
-		@Override
-		public Integer get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
-			long currentTime = System.currentTimeMillis();
-			long quitTime = currentTime + unit.toMillis(timeout);
-			do {
-				if (searched) {
-					return bestAction;
-				}
-
-				currentTime = System.currentTimeMillis();
-			} while (quitTime < currentTime);
-			return bestAction;
-		}*/
-
 		@Override
 		public String toString() {
 			StringBuilder sb = new StringBuilder();
-			if (searched) {
-				sb.append(String.format("Search terminated after %dms%n", elapsedTime));
+			if (searching) {
+				sb.append(String.format("Still searching...%n"));
 			} else {
-				sb.append(String.format("Search terminated before completion%n"));
+				sb.append(String.format("Search terminated after %dms%n", timeElapsed));
 			}
 
-			sb.append(String.format("Nodes expanded: %d%n", expandedNodes));
-			sb.append(String.format("Max depth: %d", depthLimit));
+			sb.append(String.format("Nodes expanded: %d%n", nodesExpanded));
+			sb.append(String.format("Max depth: %d", maxDepthSearched));
 			return sb.toString();
 		}
 	}
@@ -493,34 +550,182 @@ public class Game implements Runnable {
 		static final int I_MASK = 0xF0;
 		static final int J_MASK = 0x0F;
 
-		static int unmaski(int unshifted) {
-			return unshifted>>>4;
+		static final int unmaski(int compacted) {
+			return compacted >>> 4;
 		}
 
-		static int unmaskj(int unshifted) {
-			return unshifted&J_MASK;
+		static final int unmaskj(int compacted) {
+			return compacted & J_MASK;
 		}
 
-		static int shift(int i, int j) {
+		static int index(int i, int j) {
 			return ((i << 3) + j);
 		}
 
-		static int unShift(int shift) {
-			int i = ((shift >>> 3) << 4);
-			int j = ((shift &   7) << 0);
+		static int unindexi(int indexed) {
+			return (indexed >>> 3);
+		}
+
+		static int unindexj(int indexed) {
+			return (indexed & 7);
+		}
+
+		static int compact(int indexed) {
+			int i = (unindexi(indexed) << 4);
+			int j = unindexj(indexed);
 			return i|j;
 		}
 
-		static char getRow(int i) {
+		static char toLetter(int i) {
 			return (char)('A' + i);
 		}
 
-		static int getColumn(int j) {
-			return j+1;
+		static int toNumber(int j) {
+			return j + 1;
 		}
 	}
 
-	private static class State {
+	private static class Node {
+		final long O_LOCS;
+		final long X_LOCS;
+		final long BLANK_LOCS;
+
+		final int HASH;
+
+		Node(long oLocs, long xLocs) {
+			assert (oLocs&xLocs) == 0L : "oLocs cannot have matching bits within xLocs";
+			this.O_LOCS = oLocs;
+			this.X_LOCS = xLocs;
+			this.BLANK_LOCS = ~(O_LOCS|X_LOCS);
+
+			int hash = 1;
+			hash = 31 * hash + (int)(O_LOCS ^ (O_LOCS >>> 32));
+			hash = 31 * hash + (int)(X_LOCS ^ (X_LOCS >>> 32));
+			this.HASH = hash;
+		}
+
+		byte get(int i, int j) {
+			long flag = 1L << Move.index(i, j);
+			if ((O_LOCS&flag) != 0) {
+				return O;
+			} else if ((X_LOCS&flag) != 0) {
+				return X;
+			}
+
+			return BLANK;
+		}
+
+		Node set(int i, int j, byte piece) {
+			assert get(i, j) == BLANK : String.format("piece at %c%d must be blank!", Move.toLetter(i), Move.toNumber(j));
+			long flag = 1L << Move.index(i, j);
+			switch (piece) {
+				case O: return new Node(O_LOCS|flag, X_LOCS);
+				case X: return new Node(O_LOCS, X_LOCS|flag);
+				default: throw new IllegalArgumentException(String.format("val should be one of O (%d) or X (%d)", O, X));
+			}
+		}
+
+		// returns array of compacted indeces
+		int[] getActions() {
+			int i = 0;
+			int[] actions = new int[Long.SIZE];
+			for (int indexed = 0; indexed < Long.SIZE; indexed++) {
+				if ((BLANK_LOCS&(1L<<indexed)) != 0) {
+					actions[i++] = Move.compact(indexed);
+				}
+			}
+
+			Arrays.fill(actions, i, actions.length, NULL_ACTION);
+			return actions;
+		}
+
+		// returns O, X if winner, Draw if no more moves avail, Unknown if nondeterminate
+		byte getWinner() {
+			if (WinConditions.checkRows(O_LOCS) || WinConditions.checkColumns(O_LOCS)) {
+				return O;
+			} else if (WinConditions.checkRows(X_LOCS) || WinConditions.checkColumns(X_LOCS)) {
+				return X;
+			} else if (WinConditions.isDraw(BLANK_LOCS)) {
+				return DRAW;
+			}
+
+			return UNKNOWN;
+		}
+
+		// returns O or X if winner (dependant on (i, j)), Draw if no more moves avail, Unknown if nondeterminate
+		byte getLocalWinner(final int i, final int j) {
+			byte piece = get(i, j);
+			switch (piece) {
+				case O:
+					if (WinConditions.checkLocalRow(O_LOCS, i, j) || WinConditions.checkLocalColumn(O_LOCS, i, j)) {
+						return O;
+					}
+
+					break;
+				case X:
+					if (WinConditions.checkLocalRow(X_LOCS, i, j) || WinConditions.checkLocalColumn(X_LOCS, i, j)) {
+						return X;
+					}
+
+					break;
+				default:
+					throw new IllegalStateException("Location of \"get\" did not return a valid piece");
+			}
+
+			if (WinConditions.isDraw(BLANK_LOCS)) {
+				return DRAW;
+			}
+
+			return UNKNOWN;
+		}
+
+		@Override
+		public int hashCode() {
+			return HASH;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (obj == null) {
+				return false;
+			}
+
+			if (!(obj instanceof Node)) {
+				return false;
+			}
+
+			Node n = (Node)obj;
+			return this.O_LOCS == n.O_LOCS && this.X_LOCS == n.X_LOCS;
+		}
+
+		@Override
+		public String toString() {
+			StringBuilder sb = new StringBuilder(172);
+			sb.append("  ");
+			for (int i = 0; i < 8; i++) {
+				sb.append(Move.toNumber(i));
+				sb.append(' ');
+			}
+			sb.append('\n');
+
+			byte piece;
+			for (int i = 0; i < 8; i++) {
+				sb.append(Move.toLetter(i));
+				sb.append(' ');
+				for (int j = 0; j < 8; j++) {
+					piece = get(i, j);
+					sb.append(toChar(piece));
+					sb.append(' ');
+				}
+
+				sb.append('\n');
+			}
+
+			return sb.substring(0, sb.length()-1);
+		}
+	}
+
+	private static class WinConditions {
 		static boolean checkRows(long locs) {
 			long row;
 			long mask;
@@ -541,7 +746,6 @@ public class Game implements Runnable {
 			int shift = i << 3;
 			long mask = 0xFFL << shift;
 			long row = (locs&mask) >>> shift;
-
 			int jPos = 1<<j;
 			for (int winCondition = 0xF0; winCondition != 0b0111; winCondition >>>= 1) {
 				if ((winCondition&jPos) != 0 && (row&winCondition) == winCondition) {
@@ -571,8 +775,7 @@ public class Game implements Runnable {
 		static boolean checkLocalColumn(long locs, final int i, final int j) {
 			long mask = 0x0101_0101_0101_0101L << j;
 			long column = (locs&mask);
-
-			long iPos = 1L << (i << 3);
+			long iPos = 1L << Move.index(i, j);
 			for (long winCondition = 0x8080_8080_0000_0000L; winCondition != 0x0080_8080; winCondition >>>= 1) {
 				if ((winCondition&iPos) != 0 && (column&winCondition) == winCondition) {
 					return true;
@@ -582,114 +785,100 @@ public class Game implements Runnable {
 			return false;
 		}
 
-		final long O_LOCS;
-		final long X_LOCS;
-		final long BLANK_LOCS;
-
-		State() {
-			this(0L, 0L);
+		static boolean isDraw(long locs) {
+			return locs == 0L;
 		}
+	}
 
-		State(long oLocs, long xLocs) {
-			this(oLocs, xLocs, ~(oLocs|xLocs));
-		}
-
-		State(long oLocs, long xLocs, long blankLocs) {
-			assert (oLocs&xLocs) == 0 : "oLocs cannot have matching bits within xLocs";
-			assert ~(oLocs|xLocs) == blankLocs : "Blank bits should only be set if bit is not set in oLocs and xLocs";
-			this.O_LOCS = oLocs;
-			this.X_LOCS = xLocs;
-			this.BLANK_LOCS = blankLocs;
-		}
-
-		byte get(int i, int j) {
-			long flag = 1L << Move.shift(i, j);
-			if ((O_LOCS&flag) != 0) {
-				return O;
-			} else if ((X_LOCS&flag) != 0) {
-				return X;
+	private static void testMove() {
+		for (int z = 0; z < Long.SIZE; z++) {
+			int compacted = Move.compact(z);
+			int i = Move.unmaski(compacted);
+			int j = Move.unmaskj(compacted);
+			int indexed = Move.index(i, j);
+			if (z != indexed) {
+				throw new IllegalStateException();
 			}
 
-			return BLANK;
+			System.out.format("%d => %c, %d <= %d%n", z, Move.toLetter(i), Move.toNumber(j), indexed);
+		}
+	}
+
+	private static void testNode() {
+		Node n;
+		long flags = 0x0101_0101_0101_0101L;
+		System.out.format("%s%n", n = new Node(flags, 0L));
+		flags |= 0x0000_0000_0000_00FFL;
+		System.out.format("%s%n", n = new Node(flags, 0L));
+		flags |= 0xFF00_0000_0000_0000L;
+		System.out.format("%s%n", n = new Node(flags, 0L));
+		flags |= 0x8080_8080_8080_8080L;
+		System.out.format("%s%n", n = new Node(flags, 0L));
+
+		String blanks = Long.toBinaryString(n.BLANK_LOCS);
+		System.out.format("%s%n", blanks);
+		System.out.format("1's count: %d =? %d%n", Long.bitCount(n.BLANK_LOCS), 36);
+
+		flags = 0L;
+		n = new Node(flags, flags);
+		for (int j = 0; j < 8; j++) {
+			char before = toChar(n.get(0, j));
+			String blanksBefore = Long.toBinaryString(n.BLANK_LOCS);
+			n = n.set(0, j, X);
+			char after = toChar(n.get(0, j));
+			String blanksAfter = Long.toBinaryString(n.BLANK_LOCS);
+			System.out.format("%c => %c%n", before, after);
+			System.out.format("%s%n", blanksBefore);
+			System.out.format("%s%n", blanksAfter);
 		}
 
-		State set(int i, int j, byte val) {
-			assert get(i, j) == BLANK : String.format("Piece at %c%d must be blank!", Move.getRow(i), Move.getColumn(j));
-			assert Integer.bitCount(val) <= 1 : String.format("val (%d) should be a flag with a single bit set", val);
-			long flag = (1L << Move.shift(i, j));
-			switch (val) {
-				case O: return new State(O_LOCS|flag, X_LOCS);
-				case X: return new State(O_LOCS, X_LOCS|flag);
-				default: throw new IllegalArgumentException(String.format("val should be one of O (%d) or X (%d)", O, X));
+		System.out.format("%s%n", n);
+	}
+
+	private static void testActions() {
+		long flags = 0x0101_0101_0101_0101L;
+		flags |= 0x0000_0000_0000_00FFL;
+		flags |= 0xFF00_0000_0000_0000L;
+		flags |= 0x8080_8080_8080_8080L;
+		Node n = new Node(flags, 0L);
+		n = n.set(3, 3, X);
+		n = n.set(3, 4, X);
+		n = n.set(4, 3, X);
+		n = n.set(4, 4, X);
+		System.out.format("%s%n", n);
+
+		int count = 0;
+		int[] actions = n.getActions();
+		for (int action : actions) {
+			if (action == -1) {
+				break;
 			}
+
+			int i = Move.unmaski(action);
+			int j = Move.unmaskj(action);
+			System.out.format("%c, %d%n", Move.toLetter(i), Move.toNumber(j));
+			count++;
 		}
 
-		byte getWinner() {
-			if (checkRows(O_LOCS) || checkColumns(O_LOCS)) {
-				return O;
-			} else if (checkRows(X_LOCS) || checkColumns(X_LOCS)) {
-				return X;
-			} else if (BLANK_LOCS == 0L) {
-				return DRAW;
-			}
+		System.out.format("%d blanks available%n", count);
+	}
 
-			return UNKNOWN;
+	private static void testLocalWinConditions() {
+		Node n = new Node(0L, 0L);
+		n = n.set(3, 3, X);
+		n = n.set(3, 4, X);
+		n = n.set(3, 5, X);
+		n = n.set(3, 6, X);
+		System.out.format("%s%n", n);
+		byte winner = n.getLocalWinner(3, 5);
+		String result = null;
+		switch (winner) {
+			case UNKNOWN:	result = "UNKNOWN"; break;
+			case DRAW:		result = "DRAW"; break;
+			case O:		result = "O"; break;
+			case X:		result = "X"; break;
 		}
 
-		byte getLocalWinner(final int i, final int j) {
-			byte val = get(i, j);
-			assert val != BLANK : "This is a pointless call";
-			if (checkLocalRow(O_LOCS, i, j) || checkLocalColumn(O_LOCS, i, j)) {
-				return O;
-			} else if (checkLocalRow(X_LOCS, i, j) || checkLocalColumn(X_LOCS, i, j)) {
-				return X;
-			} else if (BLANK_LOCS == 0L) {
-				return DRAW;
-			}
-
-			return UNKNOWN;
-		}
-
-		int[] getSuccessorMoves(int moves) {
-			if (moves < 0) {
-				throw new IllegalArgumentException("moves must be >= 0");
-			} else if (64 < moves) {
-				throw new IllegalArgumentException("moves must be <= 64");
-			}
-
-			long flag;
-			int id = 0;
-			int[] actions = new int[64-moves];
-			for (int i = 0; i < 64; i++) {
-				flag = 1L << i;
-				if ((BLANK_LOCS&flag) != 0) {
-					actions[id++] = Move.unShift(i);
-				}
-			}
-
-			assert id == actions.length : String.format("actions length is not correct. size=%d, should be=%d", id, actions.length);
-			return actions;
-		}
-
-		@Override
-		public String toString() {
-			StringBuilder sb = new StringBuilder(172);
-			sb.append("  1 2 3 4 5 6 7 8 \n");
-
-			byte val;
-			for (int i = 0; i < 8; i++) {
-				sb.append(Move.getRow(i));
-				sb.append(' ');
-				for (int j = 0; j < 8; j++) {
-					val = get(i, j);
-					sb.append(toChar(val));
-					sb.append(' ');
-				}
-
-				sb.append('\n');
-			}
-
-			return sb.substring(0, sb.length()-1);
-		}
+		System.out.format("Winner: %s%n", result);
 	}
 }
