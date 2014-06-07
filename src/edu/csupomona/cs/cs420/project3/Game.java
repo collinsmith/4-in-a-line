@@ -16,11 +16,15 @@ import java.util.concurrent.TimeoutException;
  * off in an epic struggle taking turns placing pieces until one of them can
  * manage to get 4 of their own pieces in a line. This class also maintains an
  * AI solution which will play against the player.
- * 
+ *
  * @author Collin Smith <strong>collinsmith@csupomona.edu</strong>
  */
 public class Game implements Runnable {
 	private static enum Heuristics implements Heuristic {
+		/**
+		 * Heuristic where the utility value of a Node is determined by
+		 * counting the number of enemy nodes at that position.
+		 */
 		DEFAULT() {
 			@Override
 			public int evaluate(Node state, byte piece, final int i, final int j) {
@@ -37,37 +41,37 @@ public class Game implements Runnable {
 				}
 
 				int count = 0;
-				for (int k = 0; k < 8; k++) {
-					for (int l = 0; l < 8; l++) {
-						for (int x = Math.max(0, k-3); x < k; x++) {
-							if (state.get(x, l) == piece) {
-								count++;
-							}
-						}
+				for (int x = Math.max(0, i-3); x < i; x++) {
+					if (state.get(x, j) == piece) {
+						count++;
+					}
+				}
 
-						for (int x = Math.min(k+3, 7); k < x; x--) {
-							if (state.get(x, l) == piece) {
-								count++;
-							}
-						}
+				for (int x = Math.min(i+3, 7); i < x; x--) {
+					if (state.get(x, j) == piece) {
+						count++;
+					}
+				}
 
-						for (int y = Math.max(0, l-3); y < l; y++) {
-							if (state.get(k, y) == piece) {
-								count++;
-							}
-						}
+				for (int y = Math.max(0, j-3); y < j; y++) {
+					if (state.get(i, y) == piece) {
+						count++;
+					}
+				}
 
-						for (int y = Math.min(l+3, 7); l < y; y--) {
-							if (state.get(k, y) == piece) {
-								count++;
-							}
-						}
+				for (int y = Math.min(j+3, 7); j < y; y--) {
+					if (state.get(i, y) == piece) {
+						count++;
 					}
 				}
 
 				return count;
 			}
 		},
+		/**
+		 * Heuristic where the utility value of a Node is determined by
+		 * counting the number of straight threes and twos
+		 */
 		MARK2() {
 			@Override
 			public int evaluate(Node state, byte piece, final int i, final int j) {
@@ -127,12 +131,95 @@ public class Game implements Runnable {
 				return piece == O ? eval : -eval;
 			}
 		},
+		/**
+		 * Heuristic where the utility value of a Node is determined by
+		 * counting the number of adjacent nodes assigning heavier weights
+		 * to those that are farther away.
+		 */
+		MARK3() {
+			@Override
+			public int evaluate(Node state, byte piece, final int i, final int j) {
+				byte enemy = piece == O ? X : O;
+				byte winner = state.getLocalWinner(i, j);
+				if (winner == piece) {
+					return Integer.MAX_VALUE;
+				} else if (winner == enemy) {
+					return Integer.MIN_VALUE;
+				} else if (winner == DRAW) {
+					return 0;
+				}
+
+				byte val;
+				int bound;
+				int utility = 0;
+
+				bound = Math.min(0, i-3);
+				for (int x = i-1, iteration = 0; bound <= x; x--, iteration++) {
+					val = state.get(x, j);
+					utility += utility(piece, enemy, val, iteration);
+				}
+
+				bound = Math.max(i+3, 7);
+				for (int x = i+1, iteration = 0; x <= bound; x++, iteration++) {
+					val = state.get(x, j);
+					utility += utility(piece, enemy, val, iteration);
+				}
+
+				bound = Math.min(0, j-3);
+				for (int y = j-1, iteration = 0; bound <= y; y--, iteration++) {
+					val = state.get(i, y);
+					utility += utility(piece, enemy, val, iteration);
+				}
+
+				bound = Math.max(j+3, 7);
+				for (int y = j+1, iteration = 0; y <= bound; y++, iteration++) {
+					val = state.get(i, y);
+					utility += utility(piece, enemy, val, iteration);
+				}
+
+				return utility;
+			}
+
+			int utility(byte piece, byte enemy, byte val, int iteration) {
+				switch (iteration) {
+					case 0:
+						if (val == piece) {
+							return 1;
+						} else if (val == enemy) {
+							return 2;
+						}
+
+						break;
+					case 1:
+						if (val == piece) {
+							return 4;
+						} else if (val == enemy) {
+							return 8;
+						}
+
+						break;
+					case 2:
+						if (val == piece) {
+							return 16;
+						} else if (val == enemy) {
+							return 32;
+						}
+
+						break;
+					default:
+						assert false : "Incorrect number of iterations reached";
+						return 0;
+				}
+
+				return 0;
+			}
+		}
 	}
 
 	/**
 	 * Main method executed at program start which will initialize this game
 	 * and start it.
-	 * 
+	 *
 	 * @param args program arguments; none expected
 	 */
 	public static void main(String[] args) {
@@ -141,7 +228,7 @@ public class Game implements Runnable {
 		//testActions();
 		//testLocalWinConditions();
 
-		Game g = new Game(Heuristics.DEFAULT);
+		Game g = new Game(Heuristics.MARK3);
 		g.run();
 	}
 
@@ -154,7 +241,7 @@ public class Game implements Runnable {
 
 	/**
 	 * Returns the character value of a piece.
-	 * 
+	 *
 	 * @param piece piece to return char value of
 	 * @return char value of the piece
 	 */
@@ -170,7 +257,7 @@ public class Game implements Runnable {
 	/**
 	 * WinCondition constants.
 	 */
-	
+
 	/** Represents a state in which the winner cannot be determined */
 	private static final byte UNKNOWN	= -1;
 	/** Represents a state in which the game is a draw (no winner, and no more moves can be made */
@@ -204,7 +291,7 @@ public class Game implements Runnable {
 	/**
 	 * Constructs a Game passing a specified heuristic which will be used to
 	 * determine the objective value of each successor.
-	 * 
+	 *
 	 * @param heuristic evaluation function to use when determining the order
 	 *	of successors
 	 */
@@ -223,7 +310,7 @@ public class Game implements Runnable {
 
 		this.PLAYER_FIRST = Character.toUpperCase(SCAN.next().charAt(0)) != toChar(O);
 
-		System.out.format("How long does the AI player have to choose a move (ms)? ");
+		System.out.format("How long does the AI player have to choose a move (seconds)? ");
 		while (!SCAN.hasNextLong()) {
 			SCAN.next();
 		}
@@ -275,8 +362,8 @@ public class Game implements Runnable {
 			if ((currentPlayer&(O|X)) != 0 && lastMove != NULL_ACTION && (winner = currentState.getWinner()) != UNKNOWN) {
 				i = Move.unmaski(lastMove);
 				j = Move.unmaskj(lastMove);
-				byte check;
-				assert winner == (check = currentState.getLocalWinner(i, j)) : String.format("local winner (%d) should match global winner (%d)", check, winner);
+				byte check = currentState.getLocalWinner(i, j);
+				assert winner == check : String.format("local winner (%d) should match global winner (%d)", check, winner);
 
 				SCAN.close();
 				if (winner == DRAW) {
@@ -285,7 +372,7 @@ public class Game implements Runnable {
 					System.out.format("%c's have won!%n", toChar(currentPlayer));
 				}
 
-				return;
+				break;
 			}
 
 			currentPlayer = resolvePlayer();
@@ -303,7 +390,7 @@ public class Game implements Runnable {
 
 					int bestAction;
 					try {
-						bestAction = searcherTask.get(AI_TIME, TimeUnit.MILLISECONDS);
+						bestAction = searcherTask.get(AI_TIME, TimeUnit.SECONDS);
 					} catch (TimeoutException e) {
 						searcher.searching = false;
 						try {
@@ -351,7 +438,7 @@ public class Game implements Runnable {
 
 	/**
 	 * Resolves the player id (O, X or BLANK) at the current value of moves.
-	 * 
+	 *
 	 * @return current moving player
 	 */
 	private byte resolvePlayer() {
@@ -360,9 +447,9 @@ public class Game implements Runnable {
 
 	/**
 	 * Resolves which player is active at a specified number of moves.
-	 * 
+	 *
 	 * @param move value of moves to evaluate
-	 * 
+	 *
 	 * @return player making the action on that move
 	 */
 	private byte resolvePlayer(int move) {
@@ -427,12 +514,12 @@ public class Game implements Runnable {
 		/**
 		 * Examines a given state and returns the utility value of that
 		 * state relative to the last moved piece.
-		 * 
+		 *
 		 * @param state state to be examined
 		 * @param piece piece of which the utility should be determined for
 		 * @param x x-location of the piece
 		 * @param y y-location of the piece
-		 * 
+		 *
 		 * @return utility value of this board for piece
 		 */
 		int evaluate(Node state, byte piece, int x, int y);
@@ -468,7 +555,7 @@ public class Game implements Runnable {
 
 		/**
 		 * Constructs a searcher using the given parameters as initial state
-		 * 
+		 *
 		 * @param game game to search
 		 * @param initialState initial state of the search
 		 * @param heuristic  evaluation function used to determine the
@@ -493,7 +580,7 @@ public class Game implements Runnable {
 		 * Performs the search and returns the best action of the search.
 		 * This method is designed to be interrupted or return the current
 		 * best action found at any given time.
-		 * 
+		 *
 		 * @return best action possible
 		 * @throws Exception propagated exceptions from the search
 		 */
@@ -538,7 +625,7 @@ public class Game implements Runnable {
 					);
 
 					if (bestScore == score && RAND.nextBoolean()) {
-						//bestAction = action;
+						bestAction = action;
 					} else if (bestScore < score) {
 						bestScore = score;
 						bestAction = action;
@@ -564,7 +651,7 @@ public class Game implements Runnable {
 
 		/**
 		 * Performs a min search on a given node and returns the utility
-		 * 
+		 *
 		 * @param currentState current state to perform on
 		 * @param i last move i location
 		 * @param j last move j location
@@ -610,7 +697,7 @@ public class Game implements Runnable {
 
 		/**
 		 * Performs a max search on a given node and returns the utility
-		 * 
+		 *
 		 * @param currentState current state to perform on
 		 * @param i last move i location
 		 * @param j last move j location
@@ -656,7 +743,7 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns statistics for this search.
-		 * 
+		 *
 		 * @return the elapsed time, number of nodes expanded and max depth
 		 *	reached
 		 */
@@ -687,9 +774,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns an unmasked i value.
-		 * 
+		 *
 		 * @param compacted value to extract i from
-		 * 
+		 *
 		 * @return the value of i in the compacted value
 		 */
 		static final int unmaski(int compacted) {
@@ -698,9 +785,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns an unmasked j value.
-		 * 
+		 *
 		 * @param compacted value to extract j from
-		 * 
+		 *
 		 * @return the value of j in the compacted value
 		 */
 		static final int unmaskj(int compacted) {
@@ -709,7 +796,7 @@ public class Game implements Runnable {
 
 		/**
 		 * Indexes a given i, j pair into a 0-63 range (inclusive).
-		 * 
+		 *
 		 * @param i i value of a space
 		 * @param j j value of a space
 		 * @return indexed value of that space
@@ -720,9 +807,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns the i value of an indexed value.
-		 * 
+		 *
 		 * @param indexed indexed value to extract i from
-		 * 
+		 *
 		 * @return i value
 		 */
 		static int unindexi(int indexed) {
@@ -731,9 +818,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns the j value of an indexed value.
-		 * 
+		 *
 		 * @param indexed indexed value to extract j from
-		 * 
+		 *
 		 * @return j value
 		 */
 		static int unindexj(int indexed) {
@@ -742,9 +829,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Compacts a given indexed value into a single byte.
-		 * 
+		 *
 		 * @param indexed indexed value to extract and then compact
-		 * 
+		 *
 		 * @return a single byte containing both the i,j values
 		 */
 		static int compact(int indexed) {
@@ -755,9 +842,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns the letter value of an i location.
-		 * 
+		 *
 		 * @param i value to convert
-		 * 
+		 *
 		 * @return letter value of an i location
 		 */
 		static char toLetter(int i) {
@@ -766,9 +853,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns the number value of a j location.
-		 * 
+		 *
 		 * @param j value to convert
-		 * 
+		 *
 		 * @return numeric value of a j location
 		 */
 		static int toNumber(int j) {
@@ -793,9 +880,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Constructs a Node using the specified board params.
-		 * 
+		 *
 		 * @param oLocs long storing flags for the position of this O's are
-		 * @param xLocs long storing flags for the position of this X's are 
+		 * @param xLocs long storing flags for the position of this X's are
 		 */
 		Node(long oLocs, long xLocs) {
 			assert (oLocs&xLocs) == 0L : "oLocs cannot have matching bits within xLocs";
@@ -811,7 +898,7 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns the piece at a given (i, j)
-		 * 
+		 *
 		 * @return O, X or BLANK of that position
 		 */
 		byte get(int i, int j) {
@@ -828,11 +915,11 @@ public class Game implements Runnable {
 		/**
 		 * Returns the new Node created with the additional (i,j) set to the
 		 * given piece.
-		 * 
+		 *
 		 * @param i i location to set
 		 * @param j j location to set
 		 * @param piece value of the piece to set at that location
-		 * 
+		 *
 		 * @return a new Node with the new position set to the piece
 		 *	specified
 		 */
@@ -849,10 +936,10 @@ public class Game implements Runnable {
 		/**
 		 * Returns a list of possible actions that can be taken from this
 		 * state (blank locations).
-		 * 
+		 *
 		 * @return list of possible <strong>compacted</strong> actions
 		 *	remaining
-		 * 
+		 *
 		 * @see Move#compact(int)
 		 */
 		int[] getActions() {
@@ -870,7 +957,7 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns the winner of this state.
-		 * 
+		 *
 		 * @return the winner value of this state or UNKNOWN if unable to
 		 *	determine.
 		 */
@@ -889,10 +976,10 @@ public class Game implements Runnable {
 		/**
 		 * Returns the winner only checking the positions relative to the
 		 * specified location.
-		 * 
+		 *
 		 * @param i i location to check
 		 * @param j j location to check
-		 * 
+		 *
 		 * @return the winner of this Node searched locally
 		 */
 		byte getLocalWinner(final int i, final int j) {
@@ -922,7 +1009,7 @@ public class Game implements Runnable {
 		}
 
 		/**
-		 * {@inheritDoc} 
+		 * {@inheritDoc}
 		 */
 		@Override
 		public int hashCode() {
@@ -930,7 +1017,7 @@ public class Game implements Runnable {
 		}
 
 		/**
-		 * {@inheritDoc} 
+		 * {@inheritDoc}
 		 */
 		@Override
 		public boolean equals(Object obj) {
@@ -948,7 +1035,7 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns a String representation of this Node
-		 * 
+		 *
 		 * @return String representation of this board that can be printed
 		 */
 		@Override
@@ -985,9 +1072,9 @@ public class Game implements Runnable {
 	private static class WinConditions {
 		/**
 		 * Checks the given flags to see if there are 4 in a row
-		 * 
+		 *
 		 * @param locs the location flags to check
-		 * 
+		 *
 		 * @return {@code true} of the owners of locs has won, otherwise
 		 *	{@code false}
 		 */
@@ -1009,11 +1096,11 @@ public class Game implements Runnable {
 
 		/**
 		 * Checks the given flags to see if there are 4 in a row locally
-		 * 
+		 *
 		 * @param locs the location flags to check
 		 * @param i i location to check
 		 * @param j j location to check
-		 * 
+		 *
 		 * @return {@code true} of the owners of locs has won, otherwise
 		 *	{@code false}
 		 */
@@ -1033,9 +1120,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Checks the given flags to see if there are 4 in a column
-		 * 
+		 *
 		 * @param locs the location flags to check
-		 * 
+		 *
 		 * @return {@code true} of the owners of locs has won, otherwise
 		 *	{@code false}
 		 */
@@ -1057,11 +1144,11 @@ public class Game implements Runnable {
 
 		/**
 		 * Checks the given flags to see if there are 4 in a column locally
-		 * 
+		 *
 		 * @param locs the location flags to check
 		 * @param i i location to check
 		 * @param j j location to check
-		 * 
+		 *
 		 * @return {@code true} of the owners of locs has won, otherwise
 		 *	{@code false}
 		 */
@@ -1080,9 +1167,9 @@ public class Game implements Runnable {
 
 		/**
 		 * Returns whether or not the given flags are all blank.
-		 * 
+		 *
 		 * @param locs location flags to check
-		 * 
+		 *
 		 * @return {@code true} if no more moves can be made, otherwise
 		 *	{@code false}
 		 */
